@@ -12,17 +12,20 @@ type Machine =
         hlt : bool;
         ip : int32;
         r : uint32 array;
+        zeromem : uint32 array;
         memory : Map<uint32, uint32 array>;
+        freeid : List<uint32>;
         }
 
 // aux functions
 
-let rec NextIdx memMap =
-    ((fst ((Map.toList memMap) |> List.rev |> List.head))+1u)
-    //if (Map.containsKey I memMap) then NextIdx memMap (I+1u) else I
+let NextID mach =
+    match mach.freeid.IsEmpty with
+        | true -> ( (uint32)mach.memory.Count+1u, mach.freeid )
+        | false -> ( mach.freeid.Head, mach.freeid.Tail )
 
-let Create (memMap:Map<uint32,uint32 array>) idx len =
-    memMap.Add(idx, Array.create ((int)len) 0u)
+let Create (memMap:Map<uint32, uint32 array>) idx len =
+    memMap.Add(idx, Array.create ((int)len) 0u )
 
 let CopyMem memList idxFrom idxTo =
     let temp = (Map.find idxFrom memList)
@@ -41,22 +44,27 @@ let btou32 (arr:byte[]) idx =
 let MakeMemory arrByte =
     Array.init ((Array.length arrByte) / 4) (fun x -> btou32 arrByte x)
 
+let FindMem m I =
+    match I with
+        | 0u->m.zeromem
+        | _->Map.find I m.memory
+
 // CPU instructions
 let cMove m A B C =
-    if C <> 0u then m.r.[A]<-B
+    if C <> 0u then m.r.[(int)A]<-B
     NextM m
 
 let ldArr m A B C =
-    let vArr = (Map.find B m.memory).[(int)C]
+    let vArr = (FindMem m B).[(int)C]
     m.r.[A]<-vArr
     NextM m
 
 let stArr m A B C =
-    (Map.find A m.memory).[(int)B] <- C
+    (FindMem m A).[(int)B] <- C
     NextM m
 
 let ldVal m A V =
-    m.r.[A] <- V
+    m.r.[(int)A] <- V
     NextM m
 
 let Add m A B C = ldVal m A (B+C)
@@ -70,12 +78,12 @@ let NAnd m A B C = ldVal m A (~~~(B &&& C))
 let mRead m C = ldVal m C ((uint32)(Console.Read() &&& 0xff))
 
 let NewMem m B C =
-    let nxtId = NextIdx m.memory
-    m.r.[B] <- nxtId
-    {m with memory=(Create m.memory nxtId C); ip=(m.ip+1)}
+    let (nxtId, nxtfree) = NextID m
+    m.r.[(int)B] <- nxtId
+    {m with memory=(Create m.memory nxtId C); freeid=nxtfree; ip=(m.ip+1)}
 
-let FreeMem m (C:uint32) =
-    {m with memory=(Map.remove C m.memory); ip=(m.ip+1)}
+let FreeMem m C =
+    {m with memory=(Map.remove C m.memory); freeid=( C::m.freeid ) ; ip=(m.ip+1)}
 
 let mPrint m C =
     Console.OpenStandardOutput().WriteByte((byte)((int)(C &&& 0xffu)))
@@ -84,10 +92,10 @@ let mPrint m C =
 let Program m B C =
     match B with
     | 0u -> {m with ip=((int)C)}
-    | _ -> {m with memory=(CopyMem m.memory B 0u); ip=((int)C)}
+    | _ -> {m with zeromem=(Array.copy (Map.find B m.memory) ); ip=((int)C)}
 
 let rec Step m idx =
-    let code = (Map.find 0u m.memory).[m.ip]
+    let code = m.zeromem.[m.ip]
     let rC = (int)(code &&& 0x7u)
     let rB = (int)((code >>> 3) &&& 0x7u)
     let rA = (int)((code >>> 6) &&& 0x7u)
@@ -95,8 +103,6 @@ let rec Step m idx =
     let dB = m.r.[rB]
     let dA = m.r.[rA]
     let instr = (code >>> 28) &&& 0xfu
-    let rA1 = (int)((code >>> 25) &&& 0x7u)
-    let dV1 = (code &&& 0x01ffffffu)
     let next = 
         match instr with
         | 0u -> cMove m rA dB dC
@@ -111,7 +117,7 @@ let rec Step m idx =
         | 10u -> mPrint m dC
         | 11u -> mRead m rC
         | 12u -> Program m dB dC
-        | 13u -> ldVal m rA1 dV1
+        | 13u -> ldVal m ((((int)code >>> 25) &&& 0x7)) (code &&& 0x01ffffffu)
         | _ -> { m with hlt = true }
     if (next.hlt) then next else Step next (idx+1L)
 
@@ -123,7 +129,7 @@ let main argv =
         let data = System.IO.File.ReadAllBytes(argv.[0])
         //printfn "%A" data.Length
         let pgm = (MakeMemory data)
-        let m = {hlt = false; ip=0; r=Array.create 8 0u; memory=Map.empty.Add(0u, pgm);}
+        let m = {hlt = false; ip=0; r=Array.create 8 0u; freeid=List.empty; memory=Map.empty; zeromem=pgm;}
         let lastM = Step m 0L
         0 // return an integer exit code
     ) else 1

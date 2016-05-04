@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.2)
 project(icfpc2006)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -std=c++14 -gdwarf-2")
 
 set(SOURCE_FILES main.cpp)
 add_executable(icfpc2006 ${SOURCE_FILES})

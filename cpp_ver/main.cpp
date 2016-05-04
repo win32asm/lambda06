@@ -1,13 +1,13 @@
 #include <iostream>
+#include <algorithm>
 #include <vector>
-#include <map>
+#include <list>
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
 
 using std::vector;
-using std::map;
-using std::make_pair;
+using std::list;
 
 typedef uint32_t uint;
 
@@ -20,83 +20,94 @@ typedef uint32_t uint;
 class UM {
     uint ip;
     uint reg[8];
-    map<uint,vector<uint>*> memory;
-    vector<uint> *memzero;
-    void CMov(uint A, uint B, uint C) {
+    vector<vector<uint> *> memory;
+    vector<uint> *zeromem;
+    list<uint> freeidx;
+
+    void CMov(const uint A, const uint B, const uint C) {
         if (reg[C] != 0) reg[A] = reg[B];
         ++ip;
     }
-    void ArrGet(uint A, uint B, uint C){
-        reg[A] = memory[reg[B]]->at(reg[C]);
+    void ArrGet(const uint A, const uint B, const uint C){
+        reg[A] = (*memory[reg[B]])[reg[C]];
         ++ip;
     }
-    void ArrSet(uint A, uint B, uint C){
-        memory[reg[A]]->at(reg[B]) = reg[C];
+    void ArrSet(const uint A, const uint B, const uint C){
+        (*memory[reg[A]])[reg[B]] = reg[C];
         ++ip;
     }
-    void Add(uint A, uint B, uint C) {
+    void Add(const uint A, const uint B, const uint C) {
         reg[A] = reg[B] + reg[C];
         ++ip;
     }
-    void Mul(uint A, uint B, uint C) {
+    void Mul(const uint A, const uint B, const uint C) {
         reg[A] = reg[B] * reg[C];
         ++ip;
     }
-    void Div(uint A, uint B, uint C) {
+    void Div(const uint A, const uint B, const uint C) {
         reg[A] = reg[B] / reg[C];
         ++ip;
     }
-    void NAnd(uint A, uint B, uint C) {
+    void NAnd(const uint A, const uint B, const uint C) {
         reg[A] = ~( reg[B] & reg[C] );
         ++ip;
     }
-    void Alloc(uint B, uint C) {
-        uint idx = (uint)memory.size();
-        while (memory.find(idx) != memory.end()) ++idx;
-        memory.insert(make_pair(idx, new vector<uint>(reg[C])));
-        reg[B] = idx;
+    void Alloc(const uint B, const uint C) {
+        uint idxN;
+        if (freeidx.empty()) {
+            idxN = (uint)memory.size();
+            memory.push_back(new vector<uint>(reg[C]));
+        }else{
+            idxN = freeidx.front();
+            freeidx.pop_front();
+            memory[idxN] = new vector<uint>(reg[C]);
+        }
+        reg[B] = idxN;
         ++ip;
     }
-    void Free(uint C) {
-        auto x = memory.find(reg[C]);
-        delete x->second;
-        memory.erase(x);
+    void Free(const uint C) {
+        auto const rC = reg[C];
+        delete memory[rC];
+        memory[rC] = nullptr;
+        freeidx.push_back(rC);
         ++ip;
     }
-    void Output(uint C) {
+    void Output(const uint C) {
         putchar((int)reg[C]);
         fflush(stdout);
         ++ip;
     }
-    void Input(uint C) {
+    void Input(const uint C) {
         reg[C] = (uint)getchar();
         ++ip;
     }
-    void LoadProg(uint B, uint C) {
-        if (reg[B] != 0) {
-            memory.erase(0);
-            delete memzero;
-            memzero = new vector<uint>(*memory[reg[B]]);
-            memory.insert(make_pair(0, memzero));
+    void LoadProg(const uint B, const uint C) {
+        auto const rB = reg[B];
+        if (rB != 0) {
+            delete zeromem;
+            memory[0] = new vector<uint>(*memory[rB]);
+            zeromem = memory[0];
         }
         ip = reg[C];
     }
 
-
 public:
     ~UM() {
-        for(auto a:memory) {
-            delete(a.second);
+        printf("final memory reservation: %li\n", memory.size());
+        for(auto vec:memory) {
+            if (vec) delete(vec);
         }
         memory.clear();
     }
-    UM(vector<uint> *base):ip(0) {
+    UM(const vector<uint> &base):ip(0) {
         memset(reg, 0, sizeof(reg));
-        memzero = base;
-        memory.insert(make_pair(0, memzero));
+
+        memory.push_back(new vector<uint>(base));
+        zeromem = memory[0];
     }
+
     bool Step() {
-        uint code = (*memzero)[ip];
+        uint code = (*zeromem)[ip];
         switch (code >> 28) {
             case 0: CMov (GetA(code), GetB(code), GetC(code)); break;
             case 1: ArrGet (GetA(code), GetB(code), GetC(code)); break;
@@ -134,9 +145,9 @@ int main(int argc, char **argv) {
     }
     off_t pos = lseek(fh, 0, SEEK_END);
     lseek(fh, 0, SEEK_SET);
-    vector<uint> *data = new vector<uint>(pos/sizeof(uint));
+    vector<uint> data(pos/sizeof(uint));
     printf("reading %li bytes\n", pos);
-    long rd = read( fh, &((*data)[0]), pos);
+    long rd = read( fh, &(data[0]), pos);
     if (rd < 0) {
         printf("Read failed: %i\n", errno);
         close(fh);
@@ -145,8 +156,8 @@ int main(int argc, char **argv) {
     close(fh);
 
     printf("preparing data\n");
-    for (int i=0; i<data->size(); ++i) {
-        uint &x=data->at((uint)i);
+    for (int i=0; i<data.size(); ++i) {
+        uint &x=data[(uint)i];
         x=((x&0xFF)<<24)+((x&0xFF00)<<8)+((x&0xFF0000)>>8)+(x>>24);
     }
 
