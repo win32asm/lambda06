@@ -13,8 +13,7 @@ type Machine =
         ip : int32;
         r : uint32 array;
         zeromem : uint32 array;
-        memory : Map<uint32, uint32 array>;
-        mapsize : uint32;
+        memory : uint32 array array;
         freeid : uint32 list;
         }
 
@@ -22,12 +21,14 @@ type Machine =
 
 let NextID mach =
     match mach.freeid.IsEmpty with
-        | true -> ( mach.mapsize, mach.freeid, mach.mapsize+1u )
-        | false -> ( mach.freeid.Head, mach.freeid.Tail, mach.mapsize )
+        | true -> ( (uint32)mach.memory.Length, mach.freeid )
+        | false -> ( mach.freeid.Head, mach.freeid.Tail )
 
-let CreateMem oldmem idx len =
-    Map.add idx (Array.create ((int)len) 0u) oldmem
- 
+let CreateMem m idx len =
+    match (idx < ((uint32)m.memory.Length)) with
+        | true ->  ignore(m.memory.[(int)idx]<-(Array.zeroCreate ((int)len))); m.memory
+        | false -> Array.append m.memory [|(Array.zeroCreate ((int)len))|]
+
 let NextM m =
     {m with ip=(m.ip+1)}
 
@@ -44,7 +45,7 @@ let MakeMemory arrByte =
 let FindMem m I =
     match I with
         | 0u->m.zeromem
-        | _->m.memory.Item I
+        | _->m.memory.[(int) I]
 
 // CPU instructions
 let cMove m A B C =
@@ -75,9 +76,10 @@ let NAnd m A B C = ldVal m A (~~~(B &&& C))
 let mRead m C = ldVal m C ((uint32)(Console.Read() &&& 0xff))
 
 let NewMem m B C =
-    let (nxtId, nxtfree, nxtsize) = NextID m
+    let (nxtId, nxtfree) = NextID m
+    let updMem=CreateMem m nxtId C
     m.r.[(int)B] <- nxtId
-    {m with memory=(CreateMem m.memory nxtId C); mapsize=nxtsize; freeid=nxtfree; ip=(m.ip+1)}
+    {m with memory=updMem; freeid=nxtfree; ip=(m.ip+1)}
 
 let FreeMem m C =
     {m with freeid=( C::m.freeid ) ; ip=(m.ip+1)}
@@ -89,7 +91,7 @@ let mPrint m C =
 let Program m B C =
     match B with
     | 0u -> {m with ip=((int)C)}
-    | _ -> {m with zeromem=(Array.copy (m.memory.Item B) ); ip=((int)C)}
+    | _ -> {m with zeromem=(Array.copy (m.memory.[(int) B]) ); ip=((int)C)}
 
 let rec Step m idx =
     let code = m.zeromem.[m.ip]
@@ -126,7 +128,7 @@ let main argv =
         let data = System.IO.File.ReadAllBytes(argv.[0])
         //printfn "%A" data.Length
         let pgm = (MakeMemory data)
-        let m = {hlt = false; ip=0; r=Array.create 8 0u; freeid=List.empty; mapsize=1u; memory=Map.empty.Add(0u , Array.empty); zeromem=pgm;}
+        let m = {hlt = false; ip=0; r=Array.create 8 0u; freeid=List.empty; memory= [|Array.empty|]; zeromem=pgm;}
         let lastM = Step m 0L
         0 // return an integer exit code
     ) else 1
